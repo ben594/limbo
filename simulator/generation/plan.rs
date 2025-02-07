@@ -492,7 +492,7 @@ impl Interaction {
                     StepResult::Row => {
                         let row = rows.row().unwrap();
                         let mut r = Vec::new();
-                        for v in row.get_values() {
+                        for v in row.get_values()? {
                             let v = match v {
                                 limbo_core::OwnedValue::Null => Value::Null,
                                 limbo_core::OwnedValue::Integer(i) => Value::Integer(*i),

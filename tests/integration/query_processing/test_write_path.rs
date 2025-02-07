@@ -44,8 +44,8 @@ fn test_simple_overflow_page() -> anyhow::Result<()> {
             match rows.step()? {
                 StepResult::Row => {
                     let row = rows.row().unwrap();
-                    let first_value = row.get_value(0);
-                    let text = row.get_value(1);
+                    let first_value = row.get_value(0)?;
+                    let text = row.get_value(1)?;
                     let id = match first_value {
                         limbo_core::OwnedValue::Integer(i) => *i as i32,
                         limbo_core::OwnedValue::Float(f) => *f as i32,
@@ -120,8 +120,8 @@ fn test_sequential_overflow_page() -> anyhow::Result<()> {
             match rows.step()? {
                 StepResult::Row => {
                     let row = rows.row().unwrap();
-                    let first_value = row.get_value(0);
-                    let text = row.get_value(1);
+                    let first_value = row.get_value(0)?;
+                    let text = row.get_value(1)?;
                     let id = match first_value {
                         limbo_core::OwnedValue::Integer(i) => *i as i32,
                         limbo_core::OwnedValue::Float(f) => *f as i32,
@@ -192,7 +192,7 @@ fn test_sequential_write() -> anyhow::Result<()> {
                 match rows.step()? {
                     StepResult::Row => {
                         let row = rows.row().unwrap();
-                        let first_value = row.get_values().first().expect("missing id");
+                        let first_value = row.get_values()?.first().expect("missing id");
                         let id = match first_value {
                             limbo_core::OwnedValue::Integer(i) => *i as i32,
                             limbo_core::OwnedValue::Float(f) => *f as i32,
@@ -258,7 +258,7 @@ fn test_regression_multi_row_insert() -> anyhow::Result<()> {
             match rows.step()? {
                 StepResult::Row => {
                     let row = rows.row().unwrap();
-                    let first_value = row.get_values().first().expect("missing id");
+                    let first_value = row.get_values()?.first().expect("missing id");
                     let id = match first_value {
                         limbo_core::OwnedValue::Float(f) => *f as i32,
                         _ => panic!("expected float"),
@@ -304,7 +304,7 @@ fn test_statement_reset() -> anyhow::Result<()> {
         match stmt.step()? {
             StepResult::Row => {
                 let row = stmt.row().unwrap();
-                assert_eq!(*row.get_value(0), limbo_core::OwnedValue::Integer(1));
+                assert_eq!(*row.get_value(0)?, limbo_core::OwnedValue::Integer(1));
                 break;
             }
             StepResult::IO => tmp_db.io.run_once()?,
@@ -318,7 +318,7 @@ fn test_statement_reset() -> anyhow::Result<()> {
         match stmt.step()? {
             StepResult::Row => {
                 let row = stmt.row().unwrap();
-                assert_eq!(*row.get_value(0), limbo_core::OwnedValue::Integer(1));
+                assert_eq!(*row.get_value(0)?, limbo_core::OwnedValue::Integer(1));
                 break;
             }
             StepResult::IO => tmp_db.io.run_once()?,
@@ -368,7 +368,7 @@ fn test_wal_checkpoint() -> anyhow::Result<()> {
             match rows.step()? {
                 StepResult::Row => {
                     let row = rows.row().unwrap();
-                    let first_value = row.get_value(0);
+                    let first_value = row.get_value(0)?;
                     let id = match first_value {
                         limbo_core::OwnedValue::Integer(i) => *i as i32,
                         limbo_core::OwnedValue::Float(f) => *f as i32,
@@ -432,7 +432,7 @@ fn test_wal_restart() -> anyhow::Result<()> {
                     match rows.step()? {
                         StepResult::Row => {
                             let row = rows.row().unwrap();
-                            let first_value = row.get_value(0);
+                            let first_value = row.get_value(0)?;
                             let count = match first_value {
                                 limbo_core::OwnedValue::Integer(i) => i,
                                 _ => unreachable!(),

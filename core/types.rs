@@ -4,10 +4,11 @@ use crate::error::LimboError;
 use crate::ext::{ExtValue, ExtValueType};
 use crate::pseudo::PseudoCursor;
 use crate::storage::btree::BTreeCursor;
-use crate::storage::sqlite3_ondisk::write_varint;
+use crate::storage::sqlite3_ondisk::{read_record, write_varint};
 use crate::vdbe::sorter::Sorter;
 use crate::vdbe::VTabOpaqueCursor;
 use crate::Result;
+use std::cell::OnceCell;
 use std::fmt::Display;
 use std::rc::Rc;
 
@@ -456,35 +457,125 @@ impl<'a> FromValue<'a> for &'a str {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
-    values: Vec<OwnedValue>,
+    values: OnceCell<Vec<OwnedValue>>,
+    raw_data: Option<Vec<u8>>,
 }
 
 impl Record {
+    fn parse_if_needed(&self) -> Result<()> {
+        if self.values.get().is_none() {
+            if let Some(data) = &self.raw_data {
+                let _ = self.values.set(read_record(data)?);
+            } else {
+                unreachable!();
+            }
+        }
+        Ok(())
+    }
+
     pub fn get<'a, T: FromValue<'a> + 'a>(&'a self, idx: usize) -> Result<T> {
-        let value = &self.values[idx];
+        self.parse_if_needed()?;
+        let value = &self.values.get().unwrap()[idx];
         T::from_value(value)
     }
 
-    pub fn count(&self) -> usize {
-        self.values.len()
+    pub fn count(&self) -> Result<usize> {
+        self.parse_if_needed()?;
+        Ok(self.values.get().map(|v| v.len()).unwrap())
     }
 
-    pub fn last_value(&self) -> Option<&OwnedValue> {
-        self.values.last()
+    pub fn last_value(&self) -> Result<Option<&OwnedValue>> {
+        self.parse_if_needed()?;
+        Ok(self.values.get().map(|v| v.last()).unwrap())
     }
 
-    pub fn get_values(&self) -> &Vec<OwnedValue> {
-        &self.values
+    pub fn get_values(&self) -> Result<&Vec<OwnedValue>> {
+        self.parse_if_needed()?;
+        Ok(self.values.get().unwrap())
     }
 
-    pub fn get_value(&self, idx: usize) -> &OwnedValue {
-        &self.values[idx]
+    pub fn get_value(&self, idx: usize) -> Result<&OwnedValue> {
+        self.parse_if_needed()?;
+        Ok(&self.values.get().unwrap()[idx])
     }
 
-    pub fn len(&self) -> usize {
-        self.values.len()
+    pub fn len(&self) -> Result<usize> {
+        self.parse_if_needed()?;
+        Ok(self.values.get().map(|v| v.len()).unwrap())
+    }
+
+    pub fn new(values: Vec<OwnedValue>) -> Self {
+        let values_cell = OnceCell::new();
+        let _ = values_cell.set(values);
+        Self {
+            values: values_cell,
+            raw_data: None,
+        }
+    }
+
+    pub fn new_lazy(data: Vec<u8>) -> Self {
+        Self {
+            values: OnceCell::new(),
+            raw_data: Some(data),
+        }
+    }
+
+    pub fn serialize(&self, buf: &mut Vec<u8>) -> Result<()> {
+        let initial_i = buf.len();
+
+        // write serial types
+        for value in self.get_values()? {
+            let serial_type = SerialType::from(value);
+            buf.resize(buf.len() + 9, 0); // Ensure space for varint (1-9 bytes in length)
+            let len = buf.len();
+            let n = write_varint(&mut buf[len - 9..], serial_type.into());
+            buf.truncate(buf.len() - 9 + n); // Remove unused bytes
+        }
+
+        let mut header_size = buf.len() - initial_i;
+        // write content
+        for value in self.get_values()? {
+            match value {
+                OwnedValue::Null => {}
+                OwnedValue::Integer(i) => {
+                    let serial_type = SerialType::from(value);
+                    match serial_type {
+                        SerialType::I8 => buf.extend_from_slice(&(*i as i8).to_be_bytes()),
+                        SerialType::I16 => buf.extend_from_slice(&(*i as i16).to_be_bytes()),
+                        SerialType::I24 => buf.extend_from_slice(&(*i as i32).to_be_bytes()[1..]), // remove most significant byte
+                        SerialType::I32 => buf.extend_from_slice(&(*i as i32).to_be_bytes()),
+                        SerialType::I48 => buf.extend_from_slice(&i.to_be_bytes()[2..]), // remove 2 most significant bytes
+                        SerialType::I64 => buf.extend_from_slice(&i.to_be_bytes()),
+                        _ => unreachable!(),
+                    }
+                }
+                OwnedValue::Float(f) => buf.extend_from_slice(&f.to_be_bytes()),
+                OwnedValue::Text(t) => buf.extend_from_slice(&t.value),
+                OwnedValue::Blob(b) => buf.extend_from_slice(b),
+                // non serializable
+                OwnedValue::Agg(_) => unreachable!(),
+                OwnedValue::Record(_) => unreachable!(),
+            };
+        }
+
+        let mut header_bytes_buf: Vec<u8> = Vec::new();
+        if header_size <= 126 {
+            // common case
+            header_size += 1;
+        } else {
+            todo!("calculate big header size extra bytes");
+            // get header varint len
+            // header_size += n;
+            // if( nVarint<sqlite3VarintLen(nHdr) ) nHdr++;
+        }
+        assert!(header_size <= 126);
+        header_bytes_buf.extend(std::iter::repeat(0).take(9));
+        let n = write_varint(header_bytes_buf.as_mut_slice(), header_size as u64);
+        header_bytes_buf.truncate(n);
+        buf.splice(initial_i..initial_i, header_bytes_buf.iter().cloned());
+        Ok(())
     }
 }
 
@@ -554,67 +645,6 @@ impl From<SerialType> for u64 {
             SerialType::Text { content_size } => (content_size * 2 + 13) as u64,
             SerialType::Blob { content_size } => (content_size * 2 + 12) as u64,
         }
-    }
-}
-
-impl Record {
-    pub fn new(values: Vec<OwnedValue>) -> Self {
-        Self { values }
-    }
-
-    pub fn serialize(&self, buf: &mut Vec<u8>) {
-        let initial_i = buf.len();
-
-        // write serial types
-        for value in &self.values {
-            let serial_type = SerialType::from(value);
-            buf.resize(buf.len() + 9, 0); // Ensure space for varint (1-9 bytes in length)
-            let len = buf.len();
-            let n = write_varint(&mut buf[len - 9..], serial_type.into());
-            buf.truncate(buf.len() - 9 + n); // Remove unused bytes
-        }
-
-        let mut header_size = buf.len() - initial_i;
-        // write content
-        for value in &self.values {
-            match value {
-                OwnedValue::Null => {}
-                OwnedValue::Integer(i) => {
-                    let serial_type = SerialType::from(value);
-                    match serial_type {
-                        SerialType::I8 => buf.extend_from_slice(&(*i as i8).to_be_bytes()),
-                        SerialType::I16 => buf.extend_from_slice(&(*i as i16).to_be_bytes()),
-                        SerialType::I24 => buf.extend_from_slice(&(*i as i32).to_be_bytes()[1..]), // remove most significant byte
-                        SerialType::I32 => buf.extend_from_slice(&(*i as i32).to_be_bytes()),
-                        SerialType::I48 => buf.extend_from_slice(&i.to_be_bytes()[2..]), // remove 2 most significant bytes
-                        SerialType::I64 => buf.extend_from_slice(&i.to_be_bytes()),
-                        _ => unreachable!(),
-                    }
-                }
-                OwnedValue::Float(f) => buf.extend_from_slice(&f.to_be_bytes()),
-                OwnedValue::Text(t) => buf.extend_from_slice(&t.value),
-                OwnedValue::Blob(b) => buf.extend_from_slice(b),
-                // non serializable
-                OwnedValue::Agg(_) => unreachable!(),
-                OwnedValue::Record(_) => unreachable!(),
-            };
-        }
-
-        let mut header_bytes_buf: Vec<u8> = Vec::new();
-        if header_size <= 126 {
-            // common case
-            header_size += 1;
-        } else {
-            todo!("calculate big header size extra bytes");
-            // get header varint len
-            // header_size += n;
-            // if( nVarint<sqlite3VarintLen(nHdr) ) nHdr++;
-        }
-        assert!(header_size <= 126);
-        header_bytes_buf.extend(std::iter::repeat(0).take(9));
-        let n = write_varint(header_bytes_buf.as_mut_slice(), header_size as u64);
-        header_bytes_buf.truncate(n);
-        buf.splice(initial_i..initial_i, header_bytes_buf.iter().cloned());
     }
 }
 
@@ -695,9 +725,9 @@ mod tests {
     fn test_serialize_null() {
         let record = Record::new(vec![OwnedValue::Null]);
         let mut buf = Vec::new();
-        record.serialize(&mut buf);
+        let _ = record.serialize(&mut buf);
 
-        let header_length = record.values.len() + 1;
+        let header_length = record.len().unwrap() + 1;
         let header = &buf[0..header_length];
         // First byte should be header size
         assert_eq!(header[0], header_length as u8);
@@ -718,9 +748,9 @@ mod tests {
             OwnedValue::Integer(i64::MAX),          // Should use SERIAL_TYPE_I64
         ]);
         let mut buf = Vec::new();
-        record.serialize(&mut buf);
+        let _ = record.serialize(&mut buf);
 
-        let header_length = record.values.len() + 1;
+        let header_length = record.len().unwrap() + 1;
         let header = &buf[0..header_length];
         // First byte should be header size
         assert_eq!(header[0], header_length as u8); // Header should be larger than number of values
@@ -787,9 +817,9 @@ mod tests {
         #[warn(clippy::approx_constant)]
         let record = Record::new(vec![OwnedValue::Float(3.15555)]);
         let mut buf = Vec::new();
-        record.serialize(&mut buf);
+        let _ = record.serialize(&mut buf);
 
-        let header_length = record.values.len() + 1;
+        let header_length = record.len().unwrap() + 1;
         let header = &buf[0..header_length];
         // First byte should be header size
         assert_eq!(header[0], header_length as u8);
@@ -808,9 +838,9 @@ mod tests {
         let text = "hello";
         let record = Record::new(vec![OwnedValue::Text(Text::new(text))]);
         let mut buf = Vec::new();
-        record.serialize(&mut buf);
+        let _ = record.serialize(&mut buf);
 
-        let header_length = record.values.len() + 1;
+        let header_length = record.len().unwrap() + 1;
         let header = &buf[0..header_length];
         // First byte should be header size
         assert_eq!(header[0], header_length as u8);
@@ -827,9 +857,9 @@ mod tests {
         let blob = Rc::new(vec![1, 2, 3, 4, 5]);
         let record = Record::new(vec![OwnedValue::Blob(blob.clone())]);
         let mut buf = Vec::new();
-        record.serialize(&mut buf);
+        let _ = record.serialize(&mut buf);
 
-        let header_length = record.values.len() + 1;
+        let header_length = record.len().unwrap() + 1;
         let header = &buf[0..header_length];
         // First byte should be header size
         assert_eq!(header[0], header_length as u8);
@@ -851,9 +881,9 @@ mod tests {
             OwnedValue::Text(Text::new(text)),
         ]);
         let mut buf = Vec::new();
-        record.serialize(&mut buf);
+        let _ = record.serialize(&mut buf);
 
-        let header_length = record.values.len() + 1;
+        let header_length = record.len().unwrap() + 1;
         let header = &buf[0..header_length];
         // First byte should be header size
         assert_eq!(header[0], header_length as u8);

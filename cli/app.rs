@@ -301,7 +301,7 @@ impl<'a> Limbo<'a> {
             select,
             |row: &limbo_core::Row| -> Result<(), LimboError> {
                 let values = row
-                    .get_values()
+                    .get_values()?
                     .into_iter()
                     .zip(value_types.iter())
                     .map(|(value, value_type)| {
@@ -676,7 +676,7 @@ impl<'a> Limbo<'a> {
                     match rows.step() {
                         Ok(StepResult::Row) => {
                             let row = rows.row().unwrap();
-                            for (i, value) in row.get_values().iter().enumerate() {
+                            for (i, value) in row.get_values()?.iter().enumerate() {
                                 if i > 0 {
                                     let _ = self.writer.write(b"|");
                                 }
@@ -738,7 +738,7 @@ impl<'a> Limbo<'a> {
                                 let record = rows.row().unwrap();
                                 let mut row = Row::new();
                                 row.max_height(1);
-                                for value in record.get_values() {
+                                for value in record.get_values()? {
                                     let (content, alignment) = match value {
                                         OwnedValue::Null => {
                                             (self.opts.null_value.clone(), CellAlignment::Left)
@@ -816,7 +816,7 @@ impl<'a> Limbo<'a> {
                     match rows.step()? {
                         StepResult::Row => {
                             let row = rows.row().unwrap();
-                            if let Some(OwnedValue::Text(schema)) = row.get_values().first() {
+                            if let Some(OwnedValue::Text(schema)) = row.get_values()?.first() {
                                 let _ = self.write_fmt(format_args!("{};", schema.as_str()));
                                 found = true;
                             }
@@ -874,7 +874,7 @@ impl<'a> Limbo<'a> {
                     match rows.step()? {
                         StepResult::Row => {
                             let row = rows.row().unwrap();
-                            if let Some(OwnedValue::Text(table)) = row.get_values().first() {
+                            if let Some(OwnedValue::Text(table)) = row.get_values()?.first() {
                                 tables.push_str(table.as_str());
                                 tables.push(' ');
                             }

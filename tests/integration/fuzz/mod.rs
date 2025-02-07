@@ -72,6 +72,7 @@ mod tests {
             };
             let row = row
                 .get_values()
+                .unwrap()
                 .iter()
                 .map(|x| match x {
                     limbo_core::OwnedValue::Null => rusqlite::types::Value::Null,

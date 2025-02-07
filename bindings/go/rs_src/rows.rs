@@ -75,8 +75,13 @@ pub extern "C" fn rows_get_value(ctx: *mut c_void, col_idx: usize) -> *const c_v
     let ctx = LimboRows::from_ptr(ctx);
 
     if let Some(row) = ctx.stmt.row() {
-        if let Some(value) = row.get_values().get(col_idx) {
-            return LimboValue::from_value(value).to_ptr();
+        match row.get_values() {
+            Ok(values) => {
+                if let Some(value) = values.get(col_idx) {
+                    return LimboValue::from_value(value).to_ptr();
+                }
+            }
+            Err(e) => eprintln!("Error when getting row values: {:?}", e),
         }
     }
     std::ptr::null()

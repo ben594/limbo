@@ -84,7 +84,7 @@ fn test_wal_1_writer_1_reader() -> Result<()> {
                     match rows.step().unwrap() {
                         StepResult::Row => {
                             let row = rows.row().unwrap();
-                            let first_value = row.get_value(0);
+                            let first_value = row.get_value(0).unwrap();
                             let id = match first_value {
                                 limbo_core::OwnedValue::Integer(i) => *i as i32,
                                 _ => unreachable!(),
@@ -142,7 +142,7 @@ pub(crate) fn execute_and_get_strings(
         match step_result {
             StepResult::Row => {
                 let row = stmt.row().unwrap();
-                for el in row.get_values() {
+                for el in row.get_values()? {
                     result.push(format!("{el}"));
                 }
             }
@@ -170,7 +170,7 @@ pub(crate) fn execute_and_get_ints(
         match step_result {
             StepResult::Row => {
                 let row = stmt.row().unwrap();
-                for value in row.get_values() {
+                for value in row.get_values()? {
                     let out = match value {
                         limbo_core::OwnedValue::Integer(i) => i,
                         _ => {

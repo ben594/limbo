@@ -135,7 +135,7 @@ impl Cursor {
                 })? {
                     limbo_core::StepResult::Row => {
                         let row = stmt.row().unwrap();
-                        let py_row = row_to_py(py, &row);
+                        let py_row = row_to_py(py, &row)?;
                         return Ok(Some(py_row));
                     }
                     limbo_core::StepResult::IO => {
@@ -171,7 +171,7 @@ impl Cursor {
                 })? {
                     limbo_core::StepResult::Row => {
                         let row = stmt.row().unwrap();
-                        let py_row = row_to_py(py, &row);
+                        let py_row = row_to_py(py, &row)?;
                         results.push(py_row);
                     }
                     limbo_core::StepResult::IO => {
@@ -298,9 +298,9 @@ pub fn connect(path: &str) -> Result<Connection> {
     }
 }
 
-fn row_to_py(py: Python, row: &limbo_core::Row) -> PyObject {
+fn row_to_py(py: Python, row: &limbo_core::Row) -> Result<PyObject> {
     let py_values: Vec<PyObject> = row
-        .get_values()
+        .get_values()?
         .iter()
         .map(|value| match value {
             limbo_core::OwnedValue::Null => py.None(),
@@ -312,7 +312,7 @@ fn row_to_py(py: Python, row: &limbo_core::Row) -> PyObject {
         })
         .collect();
 
-    PyTuple::new_bound(py, &py_values).to_object(py)
+    Ok(PyTuple::new_bound(py, &py_values).to_object(py))
 }
 
 #[pymodule]

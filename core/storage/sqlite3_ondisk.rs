@@ -46,7 +46,7 @@ use crate::io::{Buffer, Completion, ReadCompletion, SyncCompletion, WriteComplet
 use crate::storage::buffer_pool::BufferPool;
 use crate::storage::database::DatabaseStorage;
 use crate::storage::pager::Pager;
-use crate::types::{OwnedValue, Record, Text, TextSubtype};
+use crate::types::{OwnedValue, Text, TextSubtype};
 use crate::{File, Result};
 use parking_lot::RwLock;
 use std::cell::RefCell;
@@ -1061,7 +1061,7 @@ pub fn validate_serial_type(value: u64) -> Result<SerialType> {
     }
 }
 
-pub fn read_record(payload: &[u8]) -> Result<Record> {
+pub fn read_record(payload: &[u8]) -> Result<Vec<OwnedValue>> {
     let mut pos = 0;
     let (header_size, nr) = read_varint(payload)?;
     assert!((header_size as usize) >= nr);
@@ -1085,7 +1085,7 @@ pub fn read_record(payload: &[u8]) -> Result<Record> {
         values.push(value);
     }
 
-    Ok(Record::new(values))
+    Ok(values)
 }
 
 pub fn read_value(buf: &[u8], serial_type: SerialType) -> Result<(OwnedValue, usize)> {

@@ -826,7 +826,7 @@ impl Program {
                     let table_name = state.registers[*table_name].to_string();
                     let args = if let Some(args_reg) = args_reg {
                         if let OwnedValue::Record(rec) = &state.registers[*args_reg] {
-                            rec.get_values().iter().map(|v| v.to_ffi()).collect()
+                            rec.get_values()?.iter().map(|v| v.to_ffi()).collect()
                         } else {
                             return Err(LimboError::InternalError(
                                 "VCreate: args_reg is not a record".to_string(),
@@ -1093,7 +1093,7 @@ impl Program {
                                     if cursor.get_null_flag() {
                                         OwnedValue::Null
                                     } else {
-                                        record.get_value(*column).clone()
+                                        record.get_value(*column)?.clone()
                                     }
                                 } else {
                                     OwnedValue::Null
@@ -1108,7 +1108,7 @@ impl Program {
                                 cursor.record().map(|r| r.clone())
                             };
                             if let Some(record) = record {
-                                state.registers[*dest] = record.get_value(*column).clone();
+                                state.registers[*dest] = record.get_value(*column)?.clone();
                             } else {
                                 state.registers[*dest] = OwnedValue::Null;
                             }
@@ -1118,7 +1118,7 @@ impl Program {
                                 let mut cursor = state.get_cursor(*cursor_id);
                                 let cursor = cursor.as_pseudo_mut();
                                 if let Some(record) = cursor.record() {
-                                    record.get_value(*column).clone()
+                                    record.get_value(*column)?.clone()
                                 } else {
                                     OwnedValue::Null
                                 }
@@ -1568,8 +1568,8 @@ impl Program {
                             make_owned_record(&state.registers, start_reg, num_regs);
                         let pc = if let Some(ref idx_record) = *cursor.record() {
                             // Compare against the same number of values
-                            if idx_record.get_values()[..record_from_regs.len()]
-                                >= record_from_regs.get_values()[..]
+                            if idx_record.get_values()?[..record_from_regs.len()?]
+                                >= record_from_regs.get_values()?[..]
                             {
                                 target_pc.to_offset_int()
                             } else {
@@ -1596,8 +1596,8 @@ impl Program {
                             make_owned_record(&state.registers, start_reg, num_regs);
                         let pc = if let Some(ref idx_record) = *cursor.record() {
                             // Compare against the same number of values
-                            if idx_record.get_values()[..record_from_regs.len()]
-                                <= record_from_regs.get_values()[..]
+                            if idx_record.get_values()?[..record_from_regs.len()?]
+                                <= record_from_regs.get_values()?[..]
                             {
                                 target_pc.to_offset_int()
                             } else {
@@ -1624,8 +1624,8 @@ impl Program {
                             make_owned_record(&state.registers, start_reg, num_regs);
                         let pc = if let Some(ref idx_record) = *cursor.record() {
                             // Compare against the same number of values
-                            if idx_record.get_values()[..record_from_regs.len()]
-                                > record_from_regs.get_values()[..]
+                            if idx_record.get_values()?[..record_from_regs.len()?]
+                                > record_from_regs.get_values()?[..]
                             {
                                 target_pc.to_offset_int()
                             } else {
@@ -1652,8 +1652,8 @@ impl Program {
                             make_owned_record(&state.registers, start_reg, num_regs);
                         let pc = if let Some(ref idx_record) = *cursor.record() {
                             // Compare against the same number of values
-                            if idx_record.get_values()[..record_from_regs.len()]
-                                < record_from_regs.get_values()[..]
+                            if idx_record.get_values()?[..record_from_regs.len()?]
+                                < record_from_regs.get_values()?[..]
                             {
                                 target_pc.to_offset_int()
                             } else {
@@ -2023,7 +2023,7 @@ impl Program {
                     order,
                 } => {
                     let order = order
-                        .get_values()
+                        .get_values()?
                         .iter()
                         .map(|v| match v {
                             OwnedValue::Integer(i) => *i == 0,
